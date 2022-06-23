@@ -11,8 +11,38 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type ServerConfig struct {
+	promRegisterer prometheus.Registerer
+
+	queryUrls *[]string
+}
+
+// Config fills in default server config if unset
+func (s *ServerConfig) Config() {
+	if s.promRegisterer == nil {
+		s.promRegisterer = prometheus.DefaultRegisterer
+	}
+
+	if s.queryUrls == nil {
+		s.queryUrls = &[]string{
+			"https://google.com",
+			"https://apple.com",
+			"https://microsoft.com",
+			"https://amazon.com",
+			"https://example.com",
+		}
+	}
+}
+
 func runQuery(url string) error {
-	resp, err := http.Get(url)
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	totalRequests.Inc()
+	client := http.DefaultClient
+	resp, err := client.Do(request)
 	if err != nil {
 		return err
 	}
@@ -23,34 +53,28 @@ func runQuery(url string) error {
 
 func runAllQueries(urls []string) error {
 	eg := &errgroup.Group{}
-	for _, url := range urls {
-		totalRequests.Inc()
-		egUrl := url
+	for i := range urls {
+		url := urls[i]
 		eg.Go(func() error {
-			return runQuery(egUrl)
+			return runQuery(url)
 		})
 	}
 
 	return eg.Wait()
 }
 
-func NewServer() (*Server, error) {
-	prometheus.Register(totalRequests)
+func NewServer(serverConfig ServerConfig) (*Server, error) {
+	serverConfig.Config()
+
+	serverConfig.promRegisterer.Register(totalRequests)
 
 	router := gin.Default()
 	router.Use(static.Serve("/", static.LocalFile("./client/build", true)))
 
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
-	urls := []string{
-		"https://google.com",
-		"https://apple.com",
-		"https://microsoft.com",
-		"https://amazon.com",
-		"https://example.com",
-	}
 
 	router.GET("/ping", func(c *gin.Context) {
-		if err := runAllQueries(urls); err != nil {
+		if err := runAllQueries(*serverConfig.queryUrls); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{})
 		}
 		c.JSON(http.StatusOK, gin.H{

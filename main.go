@@ -12,7 +12,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	server, err := NewServer()
+	server, err := NewServer(ServerConfig{})
 	if err != nil {
 		log.Fatalf("error creating server: %v\n", err)
 	}
